@@ -1,16 +1,17 @@
 #!/usr/local/env ruby
 
-## Imports Basecamp Discussions into Codebase Discussions
+## Imports Unfuddle Tickets into Codebase Tickets
 
 require 'json'
 require 'net/http'
+require 'net/https'
 require 'tempfile'
 require './utils.rb'
 require 'net/http/post/multipart'
 
 # USER CONFIG BELOW #
 
-UNFUDDLE_ACCOUNT  = '' ## Unfuddle account number
+UNFUDDLE_ACCOUNT  = '' ## Unfuddle account name
 UNFUDDLE_USERNAME = '' ## Unfuddle username
 UNFUDDLE_PASSWORD = '' ## Unfuddle password
 
@@ -31,7 +32,7 @@ DEBUG = false
 
 def run_import
 	if [UNFUDDLE_ACCOUNT, UNFUDDLE_USERNAME, UNFUDDLE_PASSWORD, CODEBASE_USERNAME, CODEBASE_API_KEY, CODEBASE_PROJECT].any? { |c| c.empty? }
-		bail "Please edit the script to include your Codebase and Basecamp credentials"
+		bail "Please edit the script to include your Codebase and Unfuddle credentials"
 	end
 
 	## Build a user mapping UNFUDDLE_ID => CODEBASE_ID
