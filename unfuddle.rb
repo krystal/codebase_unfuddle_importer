@@ -14,10 +14,12 @@ require 'net/http/post/multipart'
 UNFUDDLE_ACCOUNT  = '' ## Unfuddle account name
 UNFUDDLE_USERNAME = '' ## Unfuddle username
 UNFUDDLE_PASSWORD = '' ## Unfuddle password
+UNFUDDLE_PROJECT  = :all ## OPTIONAL. The numeric id of the Unfuddle project you want to import from (example: 41). Use only if you prefer to import from one specific Unfuddle project
+UNFUDDLE_ONLY_WITH_STATUS = :all ## OPTIONAL. An array of strings representing the statuses you want to pull in from Unfuddle (example: ["new", "reassigned"]. Only used if you want to pull in just tickets with a specific status
 
 CODEBASE_USERNAME = '' ## Codebase API username from profile page
 CODEBASE_API_KEY  = '' ## Codebase API key from profile page
-CODEBASE_PROJECT = '' ## Codebase project name to import tickets to
+CODEBASE_PROJECT  = '' ## Codebase project name to import tickets to
 
 DEBUG = false
 
@@ -137,44 +139,57 @@ EOF
 		memo
 	end
 
-	unfuddle_projects = unfuddle_request('projects.json')
-	return unless unfuddle_projects
+  if !UNFUDDLE_PROJECT || UNFUDDLE_PROJECT == :all
+	  unfuddle_projects = unfuddle_request('projects.json')
+	  return unless unfuddle_projects
+  else
+    unfuddle_projects = []
+    unfuddle_projects << {"id" => UNFUDDLE_PROJECT}
+  end
 	
+  
 	unfuddle_projects.each do |unfuddle_project|
 		discussions_page = 1
 		begin
 			unfuddle_tickets = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets.json?page=#{discussions_page}")
 			return unless unfuddle_tickets
-       
+      
 			unfuddle_tickets.each do |unfuddle_ticket|
-				codebase_payload = {
-				  :ticket => {
-				    :summary => unfuddle_ticket["summary"], 
-				    :description => unfuddle_ticket["description"], 
-				    :created_at => unfuddle_ticket["created_at"], 
-				    :updated_at => unfuddle_ticket["updated_at"], 
-				    :priority_id => @priority_mapping[unfuddle_ticket["priority"]][:codebase_id],
-				    :status_id => @status_mapping[unfuddle_ticket["status"]][:codebase_id],
-				  }
-				}
-				if codebase_user_id = user_map[unfuddle_ticket["reporter_id"]]
-					codebase_payload[:ticket][:user_id] = codebase_user_id
-				else					
-					codebase_payload[:ticket][:author_name] = "Unfuddle Importer"
-					codebase_payload[:ticket][:author_email] = ""
-				end
-				
-				## Create ticket in codebase
-				codebase_discussion = codebase_request("/#{CODEBASE_PROJECT}/tickets", :post, codebase_payload)
-				
-				## Check for attachments
-				unfuddle_project_attachments = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/attachments.json")
-				if unfuddle_project_attachments
-				  unfuddle_project_attachments.each do |unfuddle_project_attachment|
-				    
-				    ## fetch attachment 
-				    attachment = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/attachments/#{unfuddle_project_attachment["id"]}/download")
-				    file = Tempfile.new(unfuddle_project_attachment["filename"])
+        
+        if UNFUDDLE_ONLY_WITH_STATUS != :all
+          if !UNFUDDLE_ONLY_WITH_STATUS.include?(unfuddle_ticket["status"].downcase)
+            next
+          end
+        end
+        
+        codebase_payload = {
+          :ticket => {
+            :summary => unfuddle_ticket["summary"], 
+            :description => unfuddle_ticket["description"], 
+            :created_at => unfuddle_ticket["created_at"], 
+            :updated_at => unfuddle_ticket["updated_at"], 
+            :priority_id => @priority_mapping[unfuddle_ticket["priority"]][:codebase_id],
+            :status_id => @status_mapping[unfuddle_ticket["status"]][:codebase_id],
+          }
+        }
+        if codebase_user_id = user_map[unfuddle_ticket["reporter_id"]]
+          codebase_payload[:ticket][:user_id] = codebase_user_id
+        else          
+          codebase_payload[:ticket][:author_name] = "Unfuddle Importer"
+          codebase_payload[:ticket][:author_email] = ""
+        end
+        
+        ## Create ticket in codebase
+        codebase_discussion = codebase_request("/#{CODEBASE_PROJECT}/tickets", :post, codebase_payload)
+        
+        ## Check for attachments
+        unfuddle_project_attachments = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/attachments.json")
+        if unfuddle_project_attachments
+          unfuddle_project_attachments.each do |unfuddle_project_attachment|
+            
+            ## fetch attachment 
+            attachment = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/attachments/#{unfuddle_project_attachment["id"]}/download")
+            file = Tempfile.new(unfuddle_project_attachment["filename"])
             begin
               file.write(attachment)
               file.rewind    
@@ -192,41 +207,41 @@ EOF
                file.close
                file.unlink
             end
-				  end
-				end
+          end
+        end
         
         unfuddle_comments = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/comments.json")
         return unless unfuddle_comments
         
         unfuddle_comments.each do |unfuddle_comment|          
           codebase_payload = {
-  				  :ticket_note => {
-  				    :content => unfuddle_comment["body"],
-  				    :created_at => unfuddle_comment["created_at"], 
-  				    :updated_at => unfuddle_comment["updated_at"]
-  				  }
-  				}
-  				
-  				if codebase_user_id = user_map[unfuddle_comment["author_id"]]
-  					codebase_payload[:ticket_note][:user_id] = codebase_user_id
-  				else					
-  					codebase_payload[:ticket_note][:author_name] = "Unfuddle Importer"
-  					codebase_payload[:ticket_note][:author_email] = ""
-  				end
-  				codebase_note = codebase_request("/#{CODEBASE_PROJECT}/tickets/#{codebase_discussion["ticket"]["ticket_id"]}/notes", :post, codebase_payload)
-  				
-  				## Check for attachments
-  				unfuddle_comment_attachments = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/comments/#{unfuddle_comment["id"]}/attachments.json")
-  				if unfuddle_comment_attachments
-  				  unfuddle_comment_attachments.each do |unfuddle_comment_attachment|
-  				    ## fetch attachment 
-  				    attachment = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/comments/#{unfuddle_comment['id']}/attachments/#{unfuddle_comment_attachment["id"]}/download")
-  				    file = Tempfile.new(unfuddle_comment_attachment["filename"])
+            :ticket_note => {
+              :content => unfuddle_comment["body"],
+              :created_at => unfuddle_comment["created_at"], 
+              :updated_at => unfuddle_comment["updated_at"]
+            }
+          }
+          
+          if codebase_user_id = user_map[unfuddle_comment["author_id"]]
+            codebase_payload[:ticket_note][:user_id] = codebase_user_id
+          else          
+            codebase_payload[:ticket_note][:author_name] = "Unfuddle Importer"
+            codebase_payload[:ticket_note][:author_email] = ""
+          end
+          codebase_note = codebase_request("/#{CODEBASE_PROJECT}/tickets/#{codebase_discussion["ticket"]["ticket_id"]}/notes", :post, codebase_payload)
+          
+          ## Check for attachments
+          unfuddle_comment_attachments = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/comments/#{unfuddle_comment["id"]}/attachments.json")
+          if unfuddle_comment_attachments
+            unfuddle_comment_attachments.each do |unfuddle_comment_attachment|
+              ## fetch attachment 
+              attachment = unfuddle_request("projects/#{unfuddle_project["id"]}/tickets/#{unfuddle_ticket["id"]}/comments/#{unfuddle_comment['id']}/attachments/#{unfuddle_comment_attachment["id"]}/download")
+              file = Tempfile.new(unfuddle_comment_attachment["filename"])
               begin
                 file.write(attachment)
                 file.rewind    
                 url = URI.parse("http://api3.codebasehq.com/#{CODEBASE_PROJECT}/tickets/#{codebase_discussion["ticket"]["ticket_id"]}/attachments")
-
+        
                 File.open(file.path) do |attach|
                   req = Net::HTTP::Post::Multipart.new url.path, "ticket_attachment[description]" => "Unfuddle Import", "ticket_attachment[attachment]" => UploadIO.new(attach, "#{unfuddle_comment_attachment["content_type"]}", "#{unfuddle_comment_attachment["filename"]}")
                   req.basic_auth(CODEBASE_USERNAME, CODEBASE_API_KEY)
@@ -234,16 +249,16 @@ EOF
                     http.request(req)
                   end
                 end
-
+        
               ensure
                  file.close
                  file.unlink
               end
-  				  end
-  				end
-  				
+            end
+          end
+          
         end
-			end
+      end
 
 			discussions_page += 1
 		end while unfuddle_tickets.length > 0
