@@ -3,7 +3,17 @@
 This script will import your tickets and attachments from Unfuddle to Codebase.
 
 ###Requirements 
-Tested on Ruby 1.9.2p318. Requires JSON and multipart-post gems. To install run:
+Tested on Ruby 1.9.2p318 and Ruby 2.0.x. 
+
+
+###Installation
+
+Install with Bundler:
+
+```
+bundle install
+```
+or install the required gems manually:
 
 ```
 gem install json
